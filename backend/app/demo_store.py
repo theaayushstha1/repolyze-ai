@@ -62,3 +62,8 @@ def add_findings(scan_id: str, findings: list[dict[str, Any]]) -> None:
 
 def get_findings(scan_id: str | uuid.UUID) -> list[dict[str, Any]]:
     return _findings.get(str(scan_id), [])
+
+
+def get_all_scans() -> list[dict[str, Any]]:
+    """Return all scans sorted by created_at descending."""
+    return sorted(_scans.values(), key=lambda s: s.get("created_at", ""), reverse=True)

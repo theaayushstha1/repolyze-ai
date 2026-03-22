@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from app.services.redteam_engine import run_redteam_scan
+
 logger = logging.getLogger(__name__)
 
 # ── Language detection map ──────────────────────────────────────────────────
@@ -102,6 +104,13 @@ def run_full_scan(repo_url: str, branch: str = "main") -> dict[str, Any]:
         mcp_results = _run_mcp_audit(repo_path, mcp_files)
         findings.extend(mcp_results)
 
+        # 3b. Run red-team probe analysis on detected agents
+        detected_agents = [name for name, found in agents.items() if found]
+        redteam_results, redteam_grade = _run_redteam_analysis(
+            repo_path, detected_agents,
+        )
+        findings.extend(redteam_results)
+
         # 4. Assign IDs and make paths relative
         for f in findings:
             f["id"] = str(uuid.uuid4())
@@ -110,7 +119,9 @@ def run_full_scan(repo_url: str, branch: str = "main") -> dict[str, Any]:
 
         # 5. Count severities
         counts = _count_severities(findings)
-        grade = _calculate_agent_grade(agent_results)
+        grade = _merge_agent_grades(
+            _calculate_agent_grade(agent_results), redteam_grade,
+        )
 
         elapsed = (datetime.now(timezone.utc) - started_at).total_seconds()
 
@@ -503,3 +514,45 @@ def _calculate_agent_grade(agent_findings: list[dict]) -> str:
     if score >= 40:
         return "D"
     return "F"
+
+
+# ── Red-team analysis ─────────────────────────────────────────────────────
+
+def _run_redteam_analysis(
+    repo_path: str, detected_agents: list[str],
+) -> tuple[list[dict[str, Any]], str]:
+    """Run red-team probe analysis if agents were detected.
+
+    Returns (findings_list, redteam_grade).
+    """
+    if not detected_agents:
+        return [], "A"
+
+    try:
+        result = run_redteam_scan(repo_path)
+    except Exception:
+        logger.exception("Red-team engine failed")
+        return [], "A"
+
+    grade = result.get("grade", "A")
+    findings = result.get("findings", [])
+
+    logger.info(
+        "Red-team scan: %d findings, grade=%s, score=%.2f, probes=%d/%d protected",
+        len(findings), grade,
+        result.get("score", 0),
+        result.get("protected_count", 0),
+        result.get("total_probes", 0),
+    )
+
+    return findings, grade
+
+
+def _merge_agent_grades(static_grade: str, redteam_grade: str) -> str:
+    """Merge the static analysis grade with the red-team grade (take worst)."""
+    grade_order = {"F": 0, "D": 1, "C": 2, "B": 3, "A": 4}
+    static_val = grade_order.get(static_grade, 4)
+    redteam_val = grade_order.get(redteam_grade, 4)
+    worst_val = min(static_val, redteam_val)
+    reverse_map = {v: k for k, v in grade_order.items()}
+    return reverse_map.get(worst_val, "A")

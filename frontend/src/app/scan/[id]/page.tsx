@@ -10,6 +10,7 @@ import { Separator } from "@/components/ui/separator";
 import { getScan, getFindings } from "@/lib/api";
 import { FindingsTable } from "@/components/report/findings-table";
 import { SummaryCards } from "@/components/report/summary-cards";
+import { AgentSafetyCard } from "@/components/report/agent-safety-card";
 import type { Scan, Finding } from "@/types/scan";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -120,6 +121,14 @@ export default function ScanPage() {
       {scan.status === "completed" && (
         <>
           <SummaryCards scan={scan} />
+
+          <AgentSafetyCard
+            grade={scan.agent_safety_grade}
+            findings={findings}
+            agentsDetected={scan.agents_detected}
+            mcpDetected={scan.mcp_detected}
+          />
+
           <Separator />
 
           <div className="flex items-center justify-between">

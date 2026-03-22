@@ -26,6 +26,13 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(demo_router)
 
+
+# Dashboard endpoint
+@app.get("/api/dashboard/scans")
+async def dashboard_scans():
+    from app.demo_store import get_all_scans
+    return get_all_scans()
+
 if __name__ == "__main__":
     print("\n  RepolyzeAI API (Demo Mode)")
     print("  http://localhost:8000")
