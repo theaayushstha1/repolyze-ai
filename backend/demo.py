@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.demo_router import router as demo_router
 from app.api.health import router as health_router
+from app.api.a2a import router as a2a_router
 
 app = FastAPI(
     title="RepolyzeAI API (Demo Mode)",
@@ -25,6 +26,7 @@ app.add_middleware(
 
 app.include_router(health_router)
 app.include_router(demo_router)
+app.include_router(a2a_router)
 
 
 # Dashboard endpoint

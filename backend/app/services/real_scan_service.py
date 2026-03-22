@@ -4,9 +4,11 @@ This replaces the demo simulation with real analysis:
 1. Clone repo (git clone --depth 1)
 2. Detect languages, agent frameworks, MCP servers
 3. Run Semgrep static analysis
-4. Run agent safety static analyzer
-5. Run MCP auditor
-6. Aggregate all findings
+4. Run secret detection (TruffleHog / regex fallback)
+5. Run dependency vulnerability scan (pip-audit / npm audit / version checker)
+6. Run agent safety static analyzer
+7. Run MCP auditor
+8. Aggregate all findings
 """
 
 import logging
@@ -21,7 +23,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from app.services.dependency_scanner import run_dependency_scan
 from app.services.redteam_engine import run_redteam_scan
+from app.services.secret_scanner import run_secret_scan
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +101,12 @@ def run_full_scan(repo_url: str, branch: str = "main") -> dict[str, Any]:
 
         semgrep_results = _run_semgrep(repo_path)
         findings.extend(semgrep_results)
+
+        secret_results = _run_secret_scan(repo_path)
+        findings.extend(secret_results)
+
+        dependency_results = _run_dependency_scan(repo_path)
+        findings.extend(dependency_results)
 
         agent_results = _run_agent_safety_scan(repo_path)
         findings.extend(agent_results)
@@ -335,6 +345,32 @@ def _extract_cwe(metadata: dict) -> str | None:
     if isinstance(cwe, str):
         return cwe
     return None
+
+
+# ── Secret Detection ───────────────────────────────────────────────────
+
+def _run_secret_scan(repo_path: str) -> list[dict[str, Any]]:
+    """Run TruffleHog / regex secret detection. Never crashes the pipeline."""
+    try:
+        results = run_secret_scan(repo_path)
+        logger.info("Secret scan: %d findings", len(results))
+        return results
+    except Exception:
+        logger.exception("Secret scan failed")
+        return []
+
+
+# ── Dependency Vulnerability Scan ─────────────────────────────────────
+
+def _run_dependency_scan(repo_path: str) -> list[dict[str, Any]]:
+    """Run dependency vulnerability audit. Never crashes the pipeline."""
+    try:
+        results = run_dependency_scan(repo_path)
+        logger.info("Dependency scan: %d findings", len(results))
+        return results
+    except Exception:
+        logger.exception("Dependency scan failed")
+        return []
 
 
 # ── Agent Safety ───────────────────────────────────────────────────────────
