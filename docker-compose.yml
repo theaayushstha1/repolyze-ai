@@ -54,6 +54,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+      - ./agents/agent_safety/probes:/app/probes
       - /app/__pycache__
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     restart: unless-stopped
@@ -75,6 +76,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+      - ./agents/agent_safety/probes:/app/probes
       - /app/__pycache__
     command: celery -A workers.celery_app worker --loglevel=info --concurrency=2
     restart: unless-stopped

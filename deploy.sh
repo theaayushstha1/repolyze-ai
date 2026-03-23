@@ -19,10 +19,23 @@ deploy_frontend() {
 deploy_backend() {
     echo "=== Deploying Backend to Cloud Run ==="
 
+    # Copy probe YAMLs into backend build context
+    echo "Copying probe files..."
+    cp -r agents/agent_safety/probes backend/probes
+
     # Build and push Docker image
     echo "Building Docker image..."
     cd backend
     gcloud builds submit --tag "$BACKEND_IMAGE" --project "$PROJECT_ID"
+    cd ..
+
+    # Clean up copied probes
+    rm -rf backend/probes
+
+    # Read env vars (skip comments, empty lines, and frontend-only vars)
+    ENV_VARS=$(grep -v '^#' .env | grep -v '^$' | grep -v '^POSTGRES_' | \
+        grep -v '^DATABASE_URL' | grep -v '^NEXT_PUBLIC_' | \
+        tr '\n' ',' | sed 's/,$//')
 
     # Deploy to Cloud Run
     echo "Deploying to Cloud Run..."
@@ -34,15 +47,13 @@ deploy_backend() {
         --allow-unauthenticated \
         --memory 2Gi \
         --cpu 2 \
-        --timeout 300 \
-        --set-env-vars "GCP_PROJECT_ID=$PROJECT_ID" \
+        --timeout 900 \
+        --set-env-vars "$ENV_VARS" \
         --max-instances 10 \
         --min-instances 0
 
-    cd ..
     echo "Backend deployed!"
 
-    # Get URL
     URL=$(gcloud run services describe repolyze-api \
         --region "$REGION" \
         --project "$PROJECT_ID" \

@@ -142,22 +142,24 @@ CONVERTERS: dict[str, Any] = {
 
 # ── Probe loading ─────────────────────────────────────────────────────────
 
-_PROBES_DIR = os.path.join(
-    os.path.dirname(__file__), "..", "..", "..", "agents", "agent_safety", "probes",
-)
+_PROBE_SEARCH_PATHS = [
+    # Monorepo layout (local dev)
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "agents", "agent_safety", "probes"),
+    # Docker container layout
+    os.path.join(os.path.dirname(__file__), "..", "..", "probes"),
+    # Relative to cwd
+    os.path.join("agents", "agent_safety", "probes"),
+    os.path.join("probes"),
+]
 
 
 def _resolve_probes_dir() -> str:
-    """Resolve the probes directory, trying relative path then absolute."""
-    candidate = os.path.normpath(_PROBES_DIR)
-    if os.path.isdir(candidate):
-        return candidate
-    # Fallback for different deployment layouts
-    fallback = os.path.normpath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "..",
-                     "agents", "agent_safety", "probes")
-    )
-    return fallback
+    """Resolve the probes directory, trying multiple paths."""
+    for path in _PROBE_SEARCH_PATHS:
+        candidate = os.path.normpath(path)
+        if os.path.isdir(candidate):
+            return candidate
+    return os.path.normpath(_PROBE_SEARCH_PATHS[0])
 
 
 def load_probe_files() -> list[dict[str, Any]]:

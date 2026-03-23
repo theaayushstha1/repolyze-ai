@@ -19,7 +19,7 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# Runtime dependencies for WeasyPrint and git
+# Runtime dependencies for PDF generation and git
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         git \
@@ -38,6 +38,10 @@ COPY --from=builder /install /usr/local
 COPY app/ ./app/
 COPY workers/ ./workers/
 COPY report/ ./report/
+COPY demo.py ./
+
+# Copy probe YAML files (pre-copied by deploy.sh or docker-compose)
+COPY probes/ ./probes/
 
 # Non-root user
 RUN useradd --create-home appuser
