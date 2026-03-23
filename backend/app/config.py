@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """Immutable application settings sourced from env vars / .env file."""
 
-    model_config = {"env_file": ".env", "frozen": True}
+    model_config = {"env_file": ".env", "frozen": True, "extra": "ignore"}
 
     # Supabase
     SUPABASE_URL: str = ""
