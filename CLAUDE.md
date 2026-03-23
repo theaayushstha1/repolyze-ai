@@ -43,9 +43,9 @@ repolyze-ai/
 │   ├── app/
 │   │   ├── api/     # Route handlers (scans, reports, health, a2a, demo_router)
 │   │   ├── services/# Scan engines (real_scan_service, secret_scanner, dependency_scanner, redteam_engine, pdf_generator)
-│   │   ├── db/      # Supabase repository layer (placeholder)
-│   │   └── models/  # Pydantic schemas
-│   └── tests/       # 31 tests (test_scan_service.py, test_demo_api.py)
+│   │   ├── db/      # 3-tier DB layer (scan_repo, finding_repo, agent_finding_repo, report_repo)
+│   │   └── models/  # Pydantic schemas (aligned with DB field names)
+│   └── tests/       # 42 tests (test_scan_service, test_demo_api, test_db_layer)
 ├── agents/          # ADK + A2A agents (7 sub-agents)
 ├── autoresearch/    # Karpathy-style self-improving rules (scan_rules.py + evaluate.py)
 ├── memory/          # Persistent memory for Claude (this system)
@@ -53,23 +53,32 @@ repolyze-ai/
 └── docs/            # PRD, architecture docs
 ```
 
-## Current State (Day 5 of 14-day MVP)
+## Current State (Day 6 of 14-day MVP — 2026-03-23)
 
 ### What Works
 - Full scan pipeline: clone -> detect -> 6 scanners -> aggregate -> PDF
 - Demo mode runs without external deps (no Supabase/Redis/API keys needed)
+- 3-tier storage fallback: Supabase -> PostgreSQL (Docker) -> in-memory
 - Frontend with 3 pages, polling, findings table, PDF download
-- 31 backend tests passing
+- Agent safety: detector, static analyzer, MCP auditor, 90 probes, 3 attack strategies
+- 42 backend tests passing
 - Autoresearch at 570 score (100% detection, 0 false positives)
 
+### Storage Layer (3-tier fallback)
+- **demo_store.py** routes all DB calls through: Supabase -> Postgres -> in-memory
+- **db/client.py** uses service_role_key (bypasses RLS for backend writes)
+- **db/scan_repo.py**, **finding_repo.py**, **agent_finding_repo.py**, **report_repo.py** all ready
+- **supabase/migrations/** has 2 migrations (schema + anonymous scan policies)
+- To activate Supabase: create project, paste real URL + keys in .env
+
 ### What's NOT Connected
-- Supabase (placeholder creds)
+- Supabase (placeholder creds, code is wired and ready)
 - Redis / Celery workers
-- Gemini API (no key)
+- Gemini API (has key, ADK pipeline skips gracefully)
 - GitHub OAuth (no app)
 - Semgrep / TruffleHog (not installed locally, uses regex fallback)
 - Auth (returns fake user)
-- SSE streaming (sends once and closes)
+- SSE streaming (polling works, SSE sends once and closes)
 
 ## Coding Conventions
 

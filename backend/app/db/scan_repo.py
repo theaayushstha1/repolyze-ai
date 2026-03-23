@@ -5,7 +5,6 @@ from typing import Any
 from uuid import UUID
 
 from app.db.client import get_supabase_client
-from app.models.scan import ScanStatus
 
 TABLE = "scans"
 
@@ -19,21 +18,30 @@ def create_scan(
 ) -> dict[str, Any]:
     """Insert a new scan record and return the created row."""
     client = get_supabase_client()
+    now = datetime.now(timezone.utc).isoformat()
     payload = {
         "repo_url": repo_url,
         "repo_name": repo_name,
         "branch": branch,
-        "status": ScanStatus.QUEUED,
+        "status": "queued",
         "progress": 0,
+        "current_step": "Queued for analysis",
         "user_id": user_id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "mcp_detected": False,
+        "total_findings": 0,
+        "critical_count": 0,
+        "high_count": 0,
+        "medium_count": 0,
+        "low_count": 0,
+        "info_count": 0,
+        "started_at": now,
+        "created_at": now,
     }
     result = client.table(TABLE).insert(payload).execute()
-    return result.data[0]
+    return _normalize(result.data[0])
 
 
-def get_scan(scan_id: UUID) -> dict[str, Any] | None:
+def get_scan(scan_id: str | UUID) -> dict[str, Any] | None:
     """Fetch a single scan by its primary key."""
     client = get_supabase_client()
     result = (
@@ -43,57 +51,39 @@ def get_scan(scan_id: UUID) -> dict[str, Any] | None:
         .maybe_single()
         .execute()
     )
-    return result.data
+    if result.data is None:
+        return None
+    return _normalize(result.data)
 
 
-def update_scan_status(
-    scan_id: UUID,
-    *,
-    status: ScanStatus,
-    error_message: str | None = None,
-) -> dict[str, Any] | None:
-    """Transition a scan to a new status."""
+def update_scan(scan_id: str | UUID, **kwargs: Any) -> dict[str, Any] | None:
+    """Update arbitrary scan fields."""
+    if not kwargs:
+        return get_scan(scan_id)
+
     client = get_supabase_client()
-    payload: dict[str, Any] = {
-        "status": status,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }
-    if error_message is not None:
-        payload["error_message"] = error_message
-    if status == ScanStatus.COMPLETED:
-        payload["completed_at"] = datetime.now(timezone.utc).isoformat()
-
     result = (
         client.table(TABLE)
-        .update(payload)
+        .update(kwargs)
         .eq("id", str(scan_id))
         .execute()
     )
-    return result.data[0] if result.data else None
+    if not result.data:
+        return None
+    return _normalize(result.data[0])
 
 
-def update_scan_progress(
-    scan_id: UUID,
-    *,
-    progress: int,
-    languages_detected: list[str] | None = None,
-) -> dict[str, Any] | None:
-    """Update the numeric progress and optional metadata."""
+def list_all_scans(*, limit: int = 100) -> list[dict[str, Any]]:
+    """List all scans ordered by creation date."""
     client = get_supabase_client()
-    payload: dict[str, Any] = {
-        "progress": min(max(progress, 0), 100),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }
-    if languages_detected is not None:
-        payload["languages_detected"] = languages_detected
-
     result = (
         client.table(TABLE)
-        .update(payload)
-        .eq("id", str(scan_id))
+        .select("*")
+        .order("created_at", desc=True)
+        .limit(limit)
         .execute()
     )
-    return result.data[0] if result.data else None
+    return [_normalize(row) for row in result.data]
 
 
 def list_user_scans(
@@ -102,13 +92,9 @@ def list_user_scans(
     page: int = 1,
     limit: int = 20,
 ) -> tuple[list[dict[str, Any]], int]:
-    """Return paginated scans for a given user.
-
-    Returns a tuple of (rows, total_count).
-    """
+    """Return paginated scans for a given user."""
     client = get_supabase_client()
     offset = (page - 1) * limit
-
     result = (
         client.table(TABLE)
         .select("*", count="exact")
@@ -118,4 +104,22 @@ def list_user_scans(
         .execute()
     )
     total = result.count if result.count is not None else 0
-    return result.data, total
+    return [_normalize(row) for row in result.data], total
+
+
+def _normalize(row: dict[str, Any]) -> dict[str, Any]:
+    """Ensure consistent defaults for optional fields."""
+    row.setdefault("mcp_detected", False)
+    row.setdefault("total_findings", 0)
+    row.setdefault("critical_count", 0)
+    row.setdefault("high_count", 0)
+    row.setdefault("medium_count", 0)
+    row.setdefault("low_count", 0)
+    row.setdefault("info_count", 0)
+    row.setdefault("agent_safety_grade", None)
+    row.setdefault("scan_duration_ms", None)
+    row.setdefault("error_message", None)
+    row.setdefault("user_id", None)
+    row.setdefault("commit_sha", None)
+    row.setdefault("current_step", None)
+    return row

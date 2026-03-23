@@ -28,23 +28,33 @@ class ScanCreate(BaseModel):
 
 
 class ScanResponse(BaseModel):
-    """Full scan record returned to callers."""
+    """Full scan record returned to callers.
+
+    Field names match the DB schema and demo_store exactly.
+    """
 
     model_config = {"frozen": True}
 
     id: UUID
     repo_url: str
     repo_name: str
+    branch: str = "main"
+    commit_sha: str | None = None
     status: ScanStatus
     progress: int = Field(ge=0, le=100, default=0)
-    languages_detected: list[str] = Field(default_factory=list)
-    findings_total: int = 0
-    findings_critical: int = 0
-    findings_high: int = 0
-    findings_medium: int = 0
-    findings_low: int = 0
-    findings_info: int = 0
-    created_at: datetime
-    updated_at: datetime
-    completed_at: datetime | None = None
+    current_step: str | None = None
+    languages_detected: list[str] | None = None
+    agents_detected: list[str] | None = None
+    mcp_detected: bool = False
+    total_findings: int = 0
+    critical_count: int = 0
+    high_count: int = 0
+    medium_count: int = 0
+    low_count: int = 0
+    info_count: int = 0
+    agent_safety_grade: str | None = None
+    scan_duration_ms: int | None = None
     error_message: str | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    created_at: datetime

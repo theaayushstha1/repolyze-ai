@@ -9,25 +9,34 @@ from app.models.finding import FindingSummary
 TABLE = "findings"
 
 
-def create_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Batch-insert findings and return created rows.
-
-    Args:
-        findings: List of finding dicts ready for insertion.
-
-    Returns:
-        The inserted rows as returned by Supabase.
-    """
+def create_findings(scan_id: str | UUID, findings: list[dict[str, Any]]) -> int:
+    """Batch-insert findings. Returns count inserted."""
     if not findings:
-        return []
+        return 0
 
     client = get_supabase_client()
+    for f in findings:
+        f["scan_id"] = str(scan_id)
+
     result = client.table(TABLE).insert(findings).execute()
+    return len(result.data)
+
+
+def get_findings(scan_id: str | UUID) -> list[dict[str, Any]]:
+    """Get all findings for a scan."""
+    client = get_supabase_client()
+    result = (
+        client.table(TABLE)
+        .select("*")
+        .eq("scan_id", str(scan_id))
+        .order("severity", desc=False)
+        .execute()
+    )
     return result.data
 
 
-def get_findings_by_scan(
-    scan_id: UUID,
+def get_findings_filtered(
+    scan_id: str | UUID,
     *,
     severity: str | None = None,
     category: str | None = None,
@@ -35,10 +44,7 @@ def get_findings_by_scan(
     page: int = 1,
     limit: int = 50,
 ) -> tuple[list[dict[str, Any]], int]:
-    """Return filtered, paginated findings for a scan.
-
-    Returns a tuple of (rows, total_count).
-    """
+    """Return filtered, paginated findings for a scan."""
     client = get_supabase_client()
     offset = (page - 1) * limit
 
@@ -65,7 +71,7 @@ def get_findings_by_scan(
     return result.data, total
 
 
-def get_finding_summary(scan_id: UUID) -> FindingSummary:
+def get_finding_summary(scan_id: str | UUID) -> FindingSummary:
     """Compute aggregated severity counts for a scan."""
     client = get_supabase_client()
     result = (
@@ -76,16 +82,11 @@ def get_finding_summary(scan_id: UUID) -> FindingSummary:
     )
 
     counts: dict[str, int] = {
-        "critical": 0,
-        "high": 0,
-        "medium": 0,
-        "low": 0,
-        "info": 0,
+        "critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0,
     }
     for row in result.data:
         key = row["severity"].lower()
         if key in counts:
             counts[key] += 1
 
-    total = sum(counts.values())
-    return FindingSummary(total=total, **counts)
+    return FindingSummary(total=sum(counts.values()), **counts)

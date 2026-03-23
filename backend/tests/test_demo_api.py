@@ -15,6 +15,7 @@ class TestHealthEndpoint:
         data = res.json()
         assert data["status"] == "healthy"
         assert data["service"] == "repolyze-ai-backend"
+        assert data["storage"] in ("supabase", "postgres", "memory")
 
 
 class TestA2AEndpoints:

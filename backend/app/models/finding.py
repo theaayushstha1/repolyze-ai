@@ -24,10 +24,10 @@ class Finding(BaseModel):
     id: UUID
     scan_id: UUID
     agent_name: str
-    tool_name: str
+    tool_name: str | None = None
     category: str
     severity: Severity
-    confidence: float = Field(ge=0.0, le=1.0)
+    confidence: str = "medium"
     title: str
     description: str
     file_path: str | None = None
@@ -39,14 +39,25 @@ class Finding(BaseModel):
     remediation: str | None = None
 
 
-class AgentFinding(Finding):
-    """Extended finding produced by an AI agent probe."""
+class AgentFinding(BaseModel):
+    """AI agent safety finding from red-team or static analysis."""
 
+    model_config = {"frozen": True}
+
+    id: UUID
+    scan_id: UUID
+    agent_name: str
     test_type: str
+    category: str
+    severity: Severity
+    title: str
+    description: str
     prompt_used: str | None = None
     response: str | None = None
-    pass_fail: str | None = None
-    risk_level: str | None = None
+    pass_fail: str = "fail"
+    risk_level: str = "medium"
+    owasp_category: str | None = None
+    remediation: str | None = None
 
 
 class FindingSummary(BaseModel):
