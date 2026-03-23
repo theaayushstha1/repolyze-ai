@@ -1,7 +1,6 @@
 """Celery tasks for repository scan processing."""
 
 import logging
-from uuid import UUID
 
 from workers.celery_app import celery_app
 
@@ -14,7 +13,7 @@ logger = logging.getLogger(__name__)
     max_retries=2,
     default_retry_delay=30,
 )
-def run_scan(self, scan_id: str) -> dict[str, str]:  # type: ignore[override]
+def run_scan(self, scan_id: str) -> dict[str, str]:
     """Execute the full scan pipeline as a background Celery task.
 
     Args:
@@ -28,7 +27,7 @@ def run_scan(self, scan_id: str) -> dict[str, str]:  # type: ignore[override]
     try:
         from app.services.scan_service import run_scan_pipeline
 
-        run_scan_pipeline(UUID(scan_id))
+        run_scan_pipeline(scan_id)
         return {"scan_id": scan_id, "status": "completed"}
 
     except Exception as exc:

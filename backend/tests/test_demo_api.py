@@ -16,6 +16,7 @@ class TestHealthEndpoint:
         assert data["status"] == "healthy"
         assert data["service"] == "repolyze-ai-backend"
         assert data["storage"] in ("supabase", "postgres", "memory")
+        assert data["tasks"] in ("celery", "asyncio")
 
 
 class TestA2AEndpoints:

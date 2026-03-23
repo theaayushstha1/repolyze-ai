@@ -1,125 +1,66 @@
-"""Demo-mode API that works without Supabase/Redis.
-Uses in-memory store. Runs REAL scanners (Semgrep, agent safety, MCP audit)
-when available, falls back to simulated data."""
+"""API routes for scans. Tries Celery for async processing,
+falls back to asyncio in-process when Redis is not available."""
 
 import asyncio
 import logging
-import random
 import re
 import uuid
 from typing import AsyncGenerator
 
-from fastapi import APIRouter, HTTPException, Query
-
-logger = logging.getLogger(__name__)
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from app.demo_store import add_findings, create_scan, get_findings, get_scan, update_scan
+from app.demo_store import (
+    add_findings, create_scan, get_findings, get_scan, update_scan,
+)
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/scans", tags=["scans"])
 
 GITHUB_URL_PATTERN = re.compile(r"^https://github\.com/[\w.\-]+/[\w.\-]+/?$")
 
-DEMO_FINDINGS = [
-    {"severity": "CRITICAL", "category": "injection", "title": "SQL Injection in query builder", "description": "User input concatenated directly into SQL query without parameterization", "file_path": "src/db/queries.py", "line_start": 45, "cwe_id": "CWE-89", "tool_name": "semgrep", "agent_name": "static_analysis", "remediation": "Use parameterized queries or an ORM"},
-    {"severity": "HIGH", "category": "secret_leak", "title": "Hardcoded API key detected", "description": "AWS access key found in source code", "file_path": "config/settings.py", "line_start": 12, "cwe_id": "CWE-798", "tool_name": "trufflehog", "agent_name": "secret_detection", "remediation": "Move secrets to environment variables or a secret manager"},
-    {"severity": "HIGH", "category": "agent_safety", "title": "Missing input guardrails on LangChain agent", "description": "Agent accepts raw user input without validation or content filtering", "file_path": "agents/chat_agent.py", "line_start": 34, "cwe_id": None, "tool_name": "agent_safety_static", "agent_name": "agent_safety", "remediation": "Add input validation and content safety guardrails before passing to LLM"},
-    {"severity": "MEDIUM", "category": "xss", "title": "Reflected XSS in search endpoint", "description": "User search query reflected in HTML response without escaping", "file_path": "src/routes/search.py", "line_start": 78, "cwe_id": "CWE-79", "tool_name": "semgrep", "agent_name": "static_analysis", "remediation": "Escape output or use a template engine with auto-escaping"},
-    {"severity": "MEDIUM", "category": "vulnerable_dependency", "title": "requests 2.25.1 has known CVE", "description": "CVE-2023-32681: Unintended leak of Proxy-Authorization header", "file_path": "requirements.txt", "line_start": 5, "cve_id": "CVE-2023-32681", "cwe_id": None, "tool_name": "osv-scanner", "agent_name": "dependency_audit", "remediation": "Upgrade to requests >= 2.31.0"},
-    {"severity": "MEDIUM", "category": "agent_safety", "title": "System prompt exposed in error handler", "description": "Full system prompt returned in API error response when LLM fails", "file_path": "agents/chat_agent.py", "line_start": 89, "cwe_id": None, "tool_name": "agent_safety_static", "agent_name": "agent_safety", "remediation": "Return generic error messages; never expose system prompts"},
-    {"severity": "LOW", "category": "mcp_security", "title": "MCP tool lacks input validation", "description": "The 'file_read' tool accepts arbitrary paths without sanitization", "file_path": "mcp_server/tools.py", "line_start": 23, "cwe_id": "CWE-22", "tool_name": "mcp_auditor", "agent_name": "mcp_auditor", "remediation": "Validate and sanitize file paths; restrict to allowed directories"},
-    {"severity": "LOW", "category": "security_misconfig", "title": "Debug mode enabled in production config", "description": "DEBUG=True found in production configuration file", "file_path": "config/production.py", "line_start": 3, "cwe_id": "CWE-489", "tool_name": "semgrep", "agent_name": "static_analysis", "remediation": "Set DEBUG=False in production"},
-    {"severity": "INFO", "category": "license", "title": "GPL-3.0 dependency in MIT project", "description": "Dependency 'some-lib' uses GPL-3.0 which is incompatible with MIT license", "file_path": "package.json", "line_start": 15, "cwe_id": None, "tool_name": "license_checker", "agent_name": "license_compliance", "remediation": "Replace with a permissively licensed alternative"},
-]
+# ── Celery availability check ──────────────────────────────────────────
 
-SCAN_STEPS = [
-    (10, "Cloning repository..."),
-    (20, "Detecting languages..."),
-    (30, "Detecting AI agents and MCP servers..."),
-    (45, "Running Semgrep static analysis..."),
-    (55, "Scanning dependencies for CVEs..."),
-    (65, "Detecting leaked secrets..."),
-    (75, "Auditing AI agent safety..."),
-    (85, "Auditing MCP server configuration..."),
-    (95, "Generating report..."),
-    (100, "Scan complete!"),
-]
+_use_celery = False
+try:
+    import redis as _redis_mod
+    from app.config import get_settings as _gs
+
+    _r = _redis_mod.from_url(_gs().REDIS_URL, socket_connect_timeout=2)
+    _r.ping()
+    _r.close()
+    _use_celery = True
+    logger.info("Redis available, Celery dispatch enabled")
+except Exception:
+    logger.info("Redis not available, using asyncio fallback for scans")
 
 
-async def _run_real_scan(scan_id: str, repo_url: str) -> None:
-    """Run REAL scan pipeline in background: clone → detect → scan → aggregate."""
-    from app.services.real_scan_service import run_full_scan
+def get_task_mode() -> str:
+    """Return which task dispatch mode is active."""
+    return "celery" if _use_celery else "asyncio"
+
+
+# ── Asyncio fallback (same as before) ──────────────────────────────────
+
+async def _run_scan_async(scan_id: str, repo_url: str) -> None:
+    """Run scan pipeline in-process via asyncio + thread executor."""
+    from app.services.scan_service import run_scan_pipeline
 
     update_scan(scan_id, status="cloning", progress=5, current_step="Cloning repository...")
-    await asyncio.sleep(0.5)  # Let frontend pick up status
+    await asyncio.sleep(0.3)
 
-    update_scan(scan_id, progress=10, current_step="Cloning repository...")
-
-    # Run the blocking scan in a thread pool to avoid blocking the event loop
     loop = asyncio.get_event_loop()
     try:
-        result = await loop.run_in_executor(None, run_full_scan, repo_url)
+        await loop.run_in_executor(None, run_scan_pipeline, scan_id)
     except Exception as exc:
-        logger.exception("Real scan failed for %s", repo_url)
+        logger.exception("Async scan failed for %s", repo_url)
         update_scan(scan_id, status="failed", error_message=str(exc))
-        return
 
-    if result.get("status") == "failed":
-        update_scan(
-            scan_id, status="failed",
-            error_message=result.get("error_message", "Unknown error"),
-        )
-        return
 
-    # Update progress through stages
-    update_scan(scan_id, progress=30, current_step="Detecting languages and frameworks...", status="analyzing")
-    await asyncio.sleep(0.3)
-
-    update_scan(
-        scan_id, progress=50,
-        current_step="Running security analysis...",
-        languages_detected=result.get("languages_detected"),
-        agents_detected=result.get("agents_detected"),
-        mcp_detected=result.get("mcp_detected", False),
-    )
-    await asyncio.sleep(0.3)
-
-    # Store findings
-    findings = result.get("findings", [])
-    for f in findings:
-        f["id"] = f.get("id") or str(uuid.uuid4())
-        f["scan_id"] = scan_id
-    add_findings(scan_id, findings)
-
-    update_scan(scan_id, progress=90, current_step="Aggregating results...")
-    await asyncio.sleep(0.3)
-
-    # Final update
-    update_scan(
-        scan_id,
-        status="completed",
-        progress=100,
-        current_step="Scan complete!",
-        total_findings=result.get("total_findings", 0),
-        critical_count=result.get("critical_count", 0),
-        high_count=result.get("high_count", 0),
-        medium_count=result.get("medium_count", 0),
-        low_count=result.get("low_count", 0),
-        info_count=result.get("info_count", 0),
-        agent_safety_grade=result.get("agent_safety_grade"),
-        scan_duration_ms=result.get("scan_duration_ms"),
-        completed_at=__import__("datetime").datetime.now(
-            __import__("datetime").timezone.utc
-        ).isoformat(),
-    )
-    logger.info(
-        "Scan %s complete: %d findings, grade=%s",
-        scan_id, len(findings), result.get("agent_safety_grade"),
-    )
-
+# ── Endpoints ──────────────────────────────────────────────────────────
 
 @router.post("", status_code=201)
-async def demo_create_scan(body: dict) -> dict:
+async def create_scan_endpoint(body: dict) -> dict:
     url = str(body.get("repo_url", "")).rstrip("/")
 
     if not GITHUB_URL_PATTERN.match(url):
@@ -128,14 +69,22 @@ async def demo_create_scan(body: dict) -> dict:
     repo_name = url.removeprefix("https://github.com/")
     scan = create_scan(repo_url=url, repo_name=repo_name, branch=body.get("branch", "main"))
 
-    # Start real scan in background
-    asyncio.create_task(_run_real_scan(scan["id"], url))
+    if _use_celery:
+        try:
+            from workers.scan_tasks import run_scan
+            run_scan.delay(scan["id"])
+            logger.info("Dispatched scan %s to Celery", scan["id"])
+        except Exception:
+            logger.warning("Celery dispatch failed, falling back to asyncio")
+            asyncio.create_task(_run_scan_async(scan["id"], url))
+    else:
+        asyncio.create_task(_run_scan_async(scan["id"], url))
 
     return scan
 
 
 @router.get("/{scan_id}")
-async def demo_get_scan(scan_id: str) -> dict:
+async def get_scan_endpoint(scan_id: str) -> dict:
     scan = get_scan(scan_id)
     if scan is None:
         raise HTTPException(status_code=404, detail="Scan not found")
@@ -143,7 +92,7 @@ async def demo_get_scan(scan_id: str) -> dict:
 
 
 @router.get("/{scan_id}/progress")
-async def demo_progress(scan_id: str) -> StreamingResponse:
+async def scan_progress(scan_id: str) -> StreamingResponse:
     scan = get_scan(scan_id)
     if scan is None:
         raise HTTPException(status_code=404, detail="Scan not found")
@@ -153,7 +102,7 @@ async def demo_progress(scan_id: str) -> StreamingResponse:
             s = get_scan(scan_id)
             if s is None:
                 break
-            yield f"data: {{\"progress\": {s['progress']}, \"step\": \"{s['current_step']}\", \"status\": \"{s['status']}\"}}\n\n"
+            yield f"data: {{\"progress\": {s['progress']}, \"step\": \"{s.get('current_step', '')}\", \"status\": \"{s['status']}\"}}\n\n"
             if s["status"] in ("completed", "failed"):
                 break
             await asyncio.sleep(2)
@@ -162,7 +111,7 @@ async def demo_progress(scan_id: str) -> StreamingResponse:
 
 
 @router.get("/{scan_id}/findings")
-async def demo_findings(scan_id: str) -> list[dict]:
+async def get_findings_endpoint(scan_id: str) -> list[dict]:
     scan = get_scan(scan_id)
     if scan is None:
         raise HTTPException(status_code=404, detail="Scan not found")
@@ -170,13 +119,13 @@ async def demo_findings(scan_id: str) -> list[dict]:
 
 
 @router.get("/{scan_id}/agent-findings")
-async def demo_agent_findings(scan_id: str) -> list[dict]:
+async def get_agent_findings_endpoint(scan_id: str) -> list[dict]:
     findings = get_findings(scan_id)
     return [f for f in findings if f.get("agent_name") == "agent_safety"]
 
 
 @router.post("/{scan_id}/reports")
-async def demo_generate_report(scan_id: str) -> dict:
+async def generate_report(scan_id: str) -> dict:
     scan = get_scan(scan_id)
     if scan is None:
         raise HTTPException(status_code=404, detail="Scan not found")
@@ -186,7 +135,7 @@ async def demo_generate_report(scan_id: str) -> dict:
 
 
 @router.get("/{scan_id}/reports/{report_id}/download")
-async def demo_download_report(scan_id: str, report_id: str):
+async def download_report(scan_id: str, report_id: str):
     from fastapi.responses import Response
     from app.services.pdf_generator import generate_report_pdf
 
