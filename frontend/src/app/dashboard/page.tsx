@@ -5,6 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { UserMenu } from "@/components/auth/user-menu";
 import type { Scan } from "@/types/scan";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -61,6 +62,7 @@ export default function DashboardPage() {
           </a>
           <nav className="ml-auto flex items-center gap-4 text-sm">
             <span className="text-foreground font-medium">Dashboard</span>
+            <UserMenu />
           </nav>
         </div>
       </header>

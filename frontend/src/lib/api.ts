@@ -1,10 +1,25 @@
 import type { Scan, Finding, AgentFinding, ScanCreate } from "@/types/scan";
+import { getAccessToken } from "@/lib/supabase/auth";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+
+  // Attach auth token if available
+  try {
+    const token = await getAccessToken();
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+  } catch {
+    // Auth not available, continue anonymously
+  }
+
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: { ...headers, ...options?.headers },
     ...options,
   });
 
@@ -43,4 +58,13 @@ export function generateReport(scanId: string): Promise<{ id: string }> {
 
 export function getReportDownloadUrl(scanId: string, reportId: string): string {
   return `${API_BASE}/api/scans/${scanId}/reports/${reportId}/download`;
+}
+
+export function getQuota(): Promise<{
+  plan: string;
+  monthly_limit: number;
+  scans_used: number;
+  scans_remaining: number;
+}> {
+  return apiFetch("/api/auth/quota");
 }

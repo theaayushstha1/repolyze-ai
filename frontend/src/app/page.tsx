@@ -1,5 +1,6 @@
 import { ScanForm } from "@/components/scan/scan-form";
 import { FeatureCards } from "@/components/scan/feature-cards";
+import { UserMenu } from "@/components/auth/user-menu";
 
 export default function HomePage() {
   return (
@@ -15,9 +16,7 @@ export default function HomePage() {
             <a href="/dashboard" className="text-muted-foreground hover:text-foreground transition-colors">
               Dashboard
             </a>
-            <a href="/auth/login" className="text-muted-foreground hover:text-foreground transition-colors">
-              Sign in
-            </a>
+            <UserMenu />
           </nav>
         </div>
       </header>
