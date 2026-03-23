@@ -43,11 +43,11 @@ LANGUAGE_MAP: dict[str, str] = {
 }
 
 AGENT_PATTERNS: dict[str, list[str]] = {
-    "LangChain": ["langchain", "from langchain"],
-    "CrewAI": ["crewai", "from crewai"],
-    "Google ADK": ["google.adk", "from google.adk"],
-    "OpenAI Agents": ["openai", "from openai"],
-    "AutoGen": ["autogen", "from autogen"],
+    "LangChain": ["from langchain", "from langgraph", "import langchain"],
+    "CrewAI": ["from crewai", "import crewai"],
+    "Google ADK": ["from google.adk", "from google import adk"],
+    "OpenAI Agents": ["from openai.agents", "from agents import"],
+    "AutoGen": ["from autogen", "import autogen"],
 }
 
 MCP_INDICATORS: list[str] = [

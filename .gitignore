@@ -79,3 +79,9 @@ generate_prd_pdf.py
 
 # Reports output
 reports/
+
+# Claude memory (personal context)
+memory/
+
+# Autoresearch results
+autoresearch/results.tsv

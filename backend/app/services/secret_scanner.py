@@ -97,7 +97,20 @@ _SCANNABLE_EXTENSIONS: frozenset[str] = frozenset((
 # Skip directories that are unlikely to contain real secrets
 _SKIP_DIRS: frozenset[str] = frozenset((
     ".git", "node_modules", "__pycache__", ".venv", "venv",
-    "dist", "build", ".tox", ".eggs",
+    "dist", "build", ".tox", ".eggs", "docs", "test_fixtures",
+))
+
+# Files to skip (examples, docs, probe definitions)
+_SKIP_FILE_PATTERNS: tuple[str, ...] = (
+    ".example", ".sample", ".template",
+    "EXAMPLE", "example_", "test_data",
+    "fixture", "mock_", "fake_",
+)
+
+# Skip files that are probe definitions or documentation
+_SKIP_FILENAMES: frozenset[str] = frozenset((
+    ".env.example", ".env.sample", ".env.template",
+    "PRD.md", "README.md", "CLAUDE.md", "CHANGELOG.md",
 ))
 
 
@@ -195,6 +208,10 @@ def _run_regex_scan(repo_path: str) -> list[dict[str, Any]]:
         for fname in files:
             ext = os.path.splitext(fname)[1].lower()
             if ext not in _SCANNABLE_EXTENSIONS:
+                continue
+            if fname in _SKIP_FILENAMES:
+                continue
+            if any(p in fname for p in _SKIP_FILE_PATTERNS):
                 continue
 
             fpath = os.path.join(root, fname)

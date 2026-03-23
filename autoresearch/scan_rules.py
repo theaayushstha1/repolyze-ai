@@ -20,7 +20,7 @@ from __future__ import annotations
 RULES: list[dict[str, str | list[str]]] = [
     # ── Injection ──────────────────────────────────────────────────────
     {
-        "pattern": r"execute\s*\(\s*[\"'].*%s",
+        "pattern": r"execute\s*\(\s*[\"'].*%s.*[\"']\s*%\s",
         "severity": "CRITICAL",
         "category": "injection",
         "cwe": "CWE-89",
@@ -202,7 +202,7 @@ RULES: list[dict[str, str | list[str]]] = [
 
     # ── MCP Security ───────────────────────────────────────────────────
     {
-        "pattern": r"@(?:mcp|server)\.tool.*\n(?:(?!validate|sanitize|check).*\n){0,5}.*subprocess",
+        "pattern": r"@(?:mcp|server)\.tool.*\n(?:(?!.*(?:validate|sanitize|check)).*\n){0,5}.*subprocess",
         "severity": "CRITICAL",
         "category": "mcp_security",
         "cwe": "CWE-78",
@@ -212,7 +212,7 @@ RULES: list[dict[str, str | list[str]]] = [
         "exclude_in": [],
     },
     {
-        "pattern": r"@(?:mcp|server)\.tool.*\n(?:(?!validate|sanitize|whitelist|allowlist).*\n){0,5}.*open\s*\(",
+        "pattern": r"@(?:mcp|server)\.tool.*\n(?:(?!.*(?:validate|sanitize|whitelist|allowlist)).*\n){0,5}.*open\s*\(",
         "severity": "HIGH",
         "category": "mcp_security",
         "cwe": "CWE-22",
@@ -264,6 +264,102 @@ RULES: list[dict[str, str | list[str]]] = [
         "cwe": "CWE-502",
         "message": "YAML load without safe loader — code execution risk",
         "remediation": "Use yaml.safe_load() instead of yaml.load()",
+        "scope": "python",
+        "exclude_in": [],
+    },
+
+    # ── exec() with user input ────────────────────────────────────
+    {
+        "pattern": r"exec\s*\(\s*(?:request|input|user|data|body|params|query)",
+        "severity": "CRITICAL",
+        "category": "agent_safety",
+        "cwe": "CWE-95",
+        "message": "exec() called with user-controlled input — arbitrary code execution",
+        "remediation": "Never exec user input; use safe parsing alternatives",
+        "scope": "python",
+        "exclude_in": [],
+    },
+
+    # ── SQL injection via string concatenation ────────────────────
+    {
+        "pattern": r"(?:SELECT|INSERT|UPDATE|DELETE)\s+.*\+\s*(?:\w+)",
+        "severity": "CRITICAL",
+        "category": "injection",
+        "cwe": "CWE-89",
+        "message": "SQL injection via string concatenation",
+        "remediation": "Use parameterized queries instead of string concatenation",
+        "scope": "python",
+        "exclude_in": ["test_", "example", "#"],
+    },
+
+    # ── NoSQL injection ───────────────────────────────────────────
+    {
+        "pattern": r"\$where.*(?:user|input|request|data|params|query)",
+        "severity": "CRITICAL",
+        "category": "injection",
+        "cwe": "CWE-943",
+        "message": "NoSQL injection via $where with user input",
+        "remediation": "Never pass user input to $where; use query operators instead",
+        "scope": "python",
+        "exclude_in": [],
+    },
+
+    # ── Hardcoded crypto IV ───────────────────────────────────────
+    {
+        "pattern": r"iv\s*=\s*b?[\"'].*[\"'].*\n.*(?:AES|CBC|CTR|GCM)|iv\s*=\s*b?[\"'].*[\"'].*(?:AES|CBC|CTR|GCM)",
+        "severity": "HIGH",
+        "category": "crypto",
+        "cwe": "CWE-329",
+        "message": "Hardcoded initialization vector (IV) in crypto operation",
+        "remediation": "Generate a random IV using os.urandom() for each encryption",
+        "scope": "python",
+        "exclude_in": ["test_"],
+    },
+
+    # ── Hardcoded password ────────────────────────────────────────
+    {
+        "pattern": r"(?:password|passwd|pwd)\s*=\s*[\"'][A-Za-z0-9_!@#$%^&*\-]{8,}[\"']",
+        "severity": "HIGH",
+        "category": "secret_leak",
+        "cwe": "CWE-798",
+        "message": "Hardcoded password detected",
+        "remediation": "Use environment variables or a secrets manager for passwords",
+        "scope": "all",
+        "exclude_in": ["test_", "example", "placeholder", "mock"],
+    },
+
+    # ── Bearer token in code ──────────────────────────────────────
+    {
+        "pattern": r"Bearer\s+eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+",
+        "severity": "HIGH",
+        "category": "secret_leak",
+        "cwe": "CWE-798",
+        "message": "Hardcoded Bearer JWT token detected",
+        "remediation": "Never hardcode tokens; retrieve dynamically from auth service",
+        "scope": "all",
+        "exclude_in": ["test_", "example", "mock"],
+    },
+
+    # ── SSRF via urllib ───────────────────────────────────────────
+    {
+        "pattern": r"urllib\.request\.urlopen\s*\(\s*(?:\w*user\w*|\w*url\w*|\w*input\w*|\w*request\w*)",
+        "severity": "HIGH",
+        "category": "ssrf",
+        "cwe": "CWE-918",
+        "message": "urllib request with user-controlled URL — SSRF risk",
+        "remediation": "Validate URLs against an allowlist; block internal/private IPs",
+        "scope": "python",
+        "exclude_in": [],
+    },
+
+    # ── marshal deserialization ───────────────────────────────────
+    {
+        "pattern": r"marshal\.loads?\s*\(",
+        "severity": "CRITICAL",
+        "category": "deserialization",
+        "cwe": "CWE-502",
+        "message": "marshal deserialization — allows arbitrary code execution",
+        "remediation": "Use JSON or a safe serialization format; never unmarshal untrusted data",
         "scope": "python",
         "exclude_in": [],
     },

@@ -370,6 +370,9 @@ def _analyze_file_against_probes(
 ) -> tuple[list[dict[str, Any]], int, int]:
     """Analyze a single agent file against all probe categories.
 
+    Aggregates findings by category (one finding per category per file)
+    instead of per-probe to avoid excessive noise.
+
     Returns (findings, total_probes, protected_count).
     """
     protections = _detect_protections(file_content)
@@ -382,22 +385,32 @@ def _analyze_file_against_probes(
         probes = probe_file.get("probes", [])
         missing = _get_missing_protections(protections, category)
 
-        for probe in probes:
-            total += 1
-            probe_id = probe.get("id", "unknown")
-            severity = probe.get("severity", "medium")
-            prompt = probe.get("prompt", "")
+        probe_count = len(probes)
+        total += probe_count
 
-            if not missing:
-                protected += 1
-                continue
+        if not missing:
+            protected += probe_count
+            continue
 
-            bypass_risks = _check_converter_bypass(file_content, prompt)
+        # Check converter bypass once per category (using first probe)
+        first_prompt = probes[0].get("prompt", "") if probes else ""
+        bypass_risks = _check_converter_bypass(file_content, first_prompt)
 
-            findings.append(_make_redteam_finding(
-                file_path, category, probe_id, severity,
-                missing, bypass_risks,
-            ))
+        # Take the highest severity from probes in this category
+        severity_order = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+        worst_severity = max(
+            (p.get("severity", "medium") for p in probes),
+            key=lambda s: severity_order.get(s.lower(), 0),
+            default="medium",
+        )
+
+        # Generate ONE finding per category per file
+        findings.append(_make_redteam_finding(
+            file_path, category,
+            f"{category}_{probe_count}_probes",
+            worst_severity,
+            missing, bypass_risks,
+        ))
 
     return findings, total, protected
 
@@ -407,15 +420,18 @@ def _analyze_file_against_probes(
 def _find_agent_files(repo_path: str) -> list[str]:
     """Find Python files that contain agent framework imports."""
     agent_import_re = re.compile(
-        r"(from\s+langchain|from\s+langgraph|from\s+crewai|"
-        r"from\s+google\.adk|from\s+openai|AgentExecutor|"
-        r"LlmAgent|CrewBase|Agent\s*\(|create_agent)",
+        r"(^\s*from\s+langchain|^\s*from\s+langgraph|^\s*from\s+crewai|"
+        r"^\s*from\s+google\.adk|^\s*from\s+openai\.agents|AgentExecutor|"
+        r"LlmAgent|CrewBase)",
+        re.MULTILINE,
     )
+    # Skip directories that contain detection/analysis code (not real agents)
+    skip_dirs = {".git", "node_modules", "__pycache__", "docs",
+                 "autoresearch", "tests", "test"}
     agent_files: list[str] = []
 
-    for root, _dirs, files in os.walk(repo_path):
-        if ".git" in root:
-            continue
+    for root, dirs, files in os.walk(repo_path):
+        dirs[:] = [d for d in dirs if d not in skip_dirs]
         for fname in files:
             if not fname.endswith(".py"):
                 continue

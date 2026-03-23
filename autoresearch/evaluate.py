@@ -112,6 +112,85 @@ VULNERABLE_SAMPLES: list[dict[str, Any]] = [
         "file_ext": ".py",
         "expected": [{"category": "path_traversal", "severity": "HIGH"}],
     },
+    # ── Agent Safety (expanded) ─────────────────────────────────────
+    {
+        "name": "exec_user_input",
+        "code": 'exec(request.form["code"])',
+        "file_ext": ".py",
+        "expected": [{"category": "agent_safety", "severity": "CRITICAL"}],
+    },
+    {
+        "name": "agent_no_guardrails",
+        "code": 'agent = AgentExecutor(llm=ChatOpenAI(), tools=tools)',
+        "file_ext": ".py",
+        "expected": [{"category": "agent_safety", "severity": "HIGH"}],
+    },
+    {
+        "name": "system_prompt_injection",
+        "code": 'system_prompt = f"You are a bot. User said: {user_input}"',
+        "file_ext": ".py",
+        "expected": [{"category": "agent_safety", "severity": "HIGH"}],
+    },
+    # ── MCP Security ───────────────────────────────────────────────
+    {
+        "name": "mcp_shell_exec",
+        "code": '@mcp.tool\ndef run_cmd(cmd: str):\n    subprocess.run(cmd, shell=True)',
+        "file_ext": ".py",
+        "expected": [{"category": "mcp_security", "severity": "CRITICAL"}],
+    },
+    {
+        "name": "mcp_file_access",
+        "code": '@server.tool\ndef read_file(path: str):\n    return open(path).read()',
+        "file_ext": ".py",
+        "expected": [{"category": "mcp_security", "severity": "HIGH"}],
+    },
+    # ── More injection variants ────────────────────────────────────
+    {
+        "name": "sql_injection_concat",
+        "code": 'query = "SELECT * FROM users WHERE name = \'" + name + "\'"',
+        "file_ext": ".py",
+        "expected": [{"category": "injection", "severity": "CRITICAL"}],
+    },
+    {
+        "name": "nosql_injection",
+        "code": 'db.users.find({"$where": user_input})',
+        "file_ext": ".py",
+        "expected": [{"category": "injection", "severity": "CRITICAL"}],
+    },
+    # ── Crypto ─────────────────────────────────────────────────────
+    {
+        "name": "hardcoded_iv",
+        "code": 'iv = b"\\x00" * 16\ncipher = AES.new(key, AES.MODE_CBC, iv)',
+        "file_ext": ".py",
+        "expected": [{"category": "crypto", "severity": "HIGH"}],
+    },
+    # ── More secrets ───────────────────────────────────────────────
+    {
+        "name": "hardcoded_db_password",
+        "code": 'password = "super_secret_db_pass_123"',
+        "file_ext": ".py",
+        "expected": [{"category": "secret_leak", "severity": "HIGH"}],
+    },
+    {
+        "name": "bearer_token_hardcoded",
+        "code": 'headers = {"Authorization": "Bearer eyJhbGciOiJIUzI1NiJ9.eyJ1c2VyIjoiam9obiJ9.abc123def456"}',
+        "file_ext": ".py",
+        "expected": [{"category": "secret_leak", "severity": "HIGH"}],
+    },
+    # ── SSRF expanded ──────────────────────────────────────────────
+    {
+        "name": "ssrf_urllib",
+        "code": 'urllib.request.urlopen(user_url)',
+        "file_ext": ".py",
+        "expected": [{"category": "ssrf", "severity": "HIGH"}],
+    },
+    # ── Deserialization expanded ───────────────────────────────────
+    {
+        "name": "marshal_load",
+        "code": 'data = marshal.loads(request.data)',
+        "file_ext": ".py",
+        "expected": [{"category": "deserialization", "severity": "CRITICAL"}],
+    },
 ]
 
 # Safe code that should NOT be flagged (false positive tests)
@@ -154,6 +233,31 @@ SAFE_SAMPLES: list[dict[str, Any]] = [
     {
         "name": "safe_json_parse",
         "code": 'data = json.loads(request.body)',
+        "file_ext": ".py",
+    },
+    {
+        "name": "safe_agent_with_guardrails",
+        "code": 'agent = AgentExecutor(llm=llm, tools=tools, input_guardrail=safety_check)',
+        "file_ext": ".py",
+    },
+    {
+        "name": "safe_mcp_with_validation",
+        "code": '@mcp.tool\ndef read_file(path: str):\n    validate(path)\n    return open(path).read()',
+        "file_ext": ".py",
+    },
+    {
+        "name": "safe_subprocess_no_shell",
+        "code": 'subprocess.run(["git", "clone", url], check=True)',
+        "file_ext": ".py",
+    },
+    {
+        "name": "safe_orm_query",
+        "code": 'User.objects.filter(name=name).first()',
+        "file_ext": ".py",
+    },
+    {
+        "name": "safe_bcrypt",
+        "code": 'hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt())',
         "file_ext": ".py",
     },
 ]

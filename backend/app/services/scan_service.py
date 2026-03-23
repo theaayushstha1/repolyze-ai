@@ -1,24 +1,16 @@
 """High-level scan orchestration service.
 
-This module coordinates the full scan lifecycle:
+Coordinates the full scan lifecycle:
 clone -> detect -> analyse -> persist findings -> generate report.
-
-Currently a placeholder; the concrete analysis pipeline will be
-implemented in subsequent iterations.
+Uses real_scan_service for actual analysis.
 """
 
 import logging
 from uuid import UUID
 
-from app.db import scan_repo
+from app.db import scan_repo, finding_repo
 from app.models.scan import ScanStatus
-from app.services.github_service import (
-    cleanup_repo,
-    clone_repo,
-    detect_agents,
-    detect_languages,
-    detect_mcp_servers,
-)
+from app.services.real_scan_service import run_full_scan
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +19,10 @@ def run_scan_pipeline(scan_id: UUID) -> None:
     """Execute the full scan pipeline for a given scan record.
 
     Steps:
-        1. Mark scan as cloning and shallow-clone the repo.
-        2. Detect languages, agent frameworks, and MCP servers.
-        3. Mark scan as analyzing (placeholder).
-        4. Mark scan as completed.
+        1. Mark scan as cloning.
+        2. Run the real scan pipeline (clone, detect, analyse).
+        3. Persist findings to Supabase.
+        4. Mark scan as completed with results.
 
     On failure the scan is moved to the FAILED status with an error
     message.
@@ -40,47 +32,65 @@ def run_scan_pipeline(scan_id: UUID) -> None:
         logger.error("Scan %s not found, aborting pipeline", scan_id)
         return
 
-    repo_path: str | None = None
-
     try:
-        # --- Clone phase ---
+        # --- Update status ---
         scan_repo.update_scan_status(scan_id, status=ScanStatus.CLONING)
         scan_repo.update_scan_progress(scan_id, progress=10)
 
-        repo_path = clone_repo(
-            row["repo_url"],
+        # --- Run the real scan pipeline ---
+        result = run_full_scan(
+            repo_url=row["repo_url"],
             branch=row.get("branch", "main"),
         )
-        scan_repo.update_scan_progress(scan_id, progress=25)
 
-        # --- Detection phase ---
-        languages = detect_languages(repo_path)
-        agents = detect_agents(repo_path)
-        mcp_servers = detect_mcp_servers(repo_path)
+        if result.get("status") == "failed":
+            scan_repo.update_scan_status(
+                scan_id,
+                status=ScanStatus.FAILED,
+                error_message=result.get("error_message", "Unknown error"),
+            )
+            return
 
+        # --- Update detection results ---
+        scan_repo.update_scan_status(scan_id, status=ScanStatus.ANALYZING)
         scan_repo.update_scan_progress(
             scan_id,
-            progress=40,
-            languages_detected=languages,
+            progress=60,
+            languages_detected=result.get("languages_detected", []),
+        )
+
+        # --- Persist findings ---
+        findings = result.get("findings", [])
+        for f in findings:
+            f["scan_id"] = str(scan_id)
+
+        if findings:
+            try:
+                finding_repo.create_findings(findings)
+            except Exception:
+                logger.warning("Failed to persist findings to Supabase", exc_info=True)
+
+        # --- Mark completed ---
+        scan_repo.update_scan_status(scan_id, status=ScanStatus.COMPLETED)
+        scan_repo.update_scan_progress(
+            scan_id,
+            progress=100,
+            total_findings=result.get("total_findings", 0),
+            critical_count=result.get("critical_count", 0),
+            high_count=result.get("high_count", 0),
+            medium_count=result.get("medium_count", 0),
+            low_count=result.get("low_count", 0),
+            info_count=result.get("info_count", 0),
+            agents_detected=result.get("agents_detected", []),
+            mcp_detected=result.get("mcp_detected", False),
+            agent_safety_grade=result.get("agent_safety_grade"),
+            scan_duration_ms=result.get("scan_duration_ms"),
         )
 
         logger.info(
-            "Scan %s: languages=%s agents=%s mcp_files=%d",
-            scan_id,
-            languages,
-            agents,
-            len(mcp_servers),
+            "Scan %s completed: %d findings, grade=%s",
+            scan_id, len(findings), result.get("agent_safety_grade"),
         )
-
-        # --- Analysis phase (placeholder) ---
-        scan_repo.update_scan_status(scan_id, status=ScanStatus.ANALYZING)
-        scan_repo.update_scan_progress(scan_id, progress=60)
-
-        # TODO: Run semgrep, AI agents, and other analysis tools here.
-
-        # --- Completion ---
-        scan_repo.update_scan_status(scan_id, status=ScanStatus.COMPLETED)
-        scan_repo.update_scan_progress(scan_id, progress=100)
 
     except Exception as exc:
         logger.exception("Scan %s failed", scan_id)
@@ -89,6 +99,3 @@ def run_scan_pipeline(scan_id: UUID) -> None:
             status=ScanStatus.FAILED,
             error_message=str(exc),
         )
-    finally:
-        if repo_path is not None:
-            cleanup_repo(repo_path)

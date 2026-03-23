@@ -42,10 +42,10 @@ LANGUAGE_MAP: dict[str, str] = {
 # ── Agent framework patterns ───────────────────────────────────────────────
 
 AGENT_PATTERNS: dict[str, list[str]] = {
-    "LangChain": [r"from\s+langchain", r"from\s+langgraph"],
-    "CrewAI": [r"from\s+crewai", r"import\s+crewai"],
-    "Google ADK": [r"from\s+google\.adk", r"google\.genai"],
-    "OpenAI Agents": [r"from\s+openai", r"openai\.agents"],
+    "LangChain": [r"^\s*from\s+langchain", r"^\s*from\s+langgraph", r"^\s*import\s+langchain"],
+    "CrewAI": [r"^\s*from\s+crewai", r"^\s*import\s+crewai"],
+    "Google ADK": [r"^\s*from\s+google\.adk", r"^\s*from\s+google\s*import\s+adk"],
+    "OpenAI Agents": [r"^\s*from\s+openai\.agents", r"^\s*from\s+agents\s+import"],
 }
 
 MCP_PATTERNS: list[str] = [
@@ -127,7 +127,35 @@ def run_full_scan(repo_url: str, branch: str = "main") -> dict[str, Any]:
             if f.get("file_path") and repo_path:
                 f["file_path"] = os.path.relpath(f["file_path"], repo_path)
 
-        # 5. Count severities
+        # 5. ADK multi-agent analysis (Critic → Researcher → Remediator)
+        try:
+            from app.services.adk_agents.pipeline import run_adk_pipeline
+            adk_result = run_adk_pipeline(
+                findings, repo_path, languages, detected_agents,
+            )
+            # Remove false positives identified by the Critic agent
+            fp_indices = set(adk_result.get("false_positives", []))
+            if fp_indices:
+                findings = [
+                    f for i, f in enumerate(findings)
+                    if i not in fp_indices
+                ]
+                logger.info("ADK Critic removed %d false positives", len(fp_indices))
+
+            # Add new findings discovered by AI agents
+            new_ai = adk_result.get("new_findings", [])
+            findings.extend(new_ai)
+            if new_ai:
+                logger.info("ADK agents found %d additional vulnerabilities", len(new_ai))
+
+            # Assign IDs to any new findings
+            for f in findings:
+                if not f.get("id"):
+                    f["id"] = str(uuid.uuid4())
+        except Exception:
+            logger.warning("ADK pipeline failed, continuing without AI review")
+
+        # 6. Count severities
         counts = _count_severities(findings)
         grade = _merge_agent_grades(
             _calculate_agent_grade(agent_results), redteam_grade,
@@ -201,12 +229,15 @@ def _detect_languages(repo_path: str) -> list[str]:
 
 def _detect_agents(repo_path: str) -> dict[str, bool]:
     detected: dict[str, bool] = {}
+    # Directories to skip when detecting agents (contain pattern strings, not real imports)
+    skip_dirs = {"agents/agent_safety", "autoresearch", "docs", ".git", "node_modules"}
     for framework, patterns in AGENT_PATTERNS.items():
-        compiled = [re.compile(p) for p in patterns]
+        compiled = [re.compile(p, re.MULTILINE) for p in patterns]
         found = False
         for root, _dirs, files in os.walk(repo_path):
-            if ".git" in root or found:
-                break
+            rel_root = os.path.relpath(root, repo_path)
+            if any(rel_root.startswith(s) or s in root for s in skip_dirs) or found:
+                continue
             for fname in files:
                 if not fname.endswith((".py", ".ts", ".js")):
                     continue
@@ -378,9 +409,15 @@ def _run_dependency_scan(repo_path: str) -> list[dict[str, Any]]:
 def _run_agent_safety_scan(repo_path: str) -> list[dict[str, Any]]:
     """Scan for agent safety issues: unsafe tools, secrets, missing guardrails."""
     findings: list[dict[str, Any]] = []
+    # Skip directories that are analysis/infra code, not application code
+    skip_dirs = {".git", "node_modules", "__pycache__", ".venv", "venv",
+                 "docs", "autoresearch", "tests", "test", ".github"}
 
-    for root, _dirs, files in os.walk(repo_path):
-        if ".git" in root:
+    for root, dirs, files in os.walk(repo_path):
+        dirs[:] = [d for d in dirs if d not in skip_dirs]
+        rel_root = os.path.relpath(root, repo_path)
+        if rel_root.startswith(("backend/app/services", "backend/app/api",
+                                "backend/workers", "backend/app/db")):
             continue
         for fname in files:
             if not fname.endswith(".py"):

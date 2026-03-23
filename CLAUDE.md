@@ -8,12 +8,12 @@ RepolyzeAI is a universal, AI-powered security audit platform. Users paste a Git
 
 ## Memory System
 
-**CRITICAL**: At the start of every session, read the memory files:
+**CRITICAL**: At the start of every session, read ALL memory files:
 ```
-~/.claude/projects/C--Users-aayus-Desktop-Start/memory/user.md
-~/.claude/projects/C--Users-aayus-Desktop-Start/memory/decisions.md
-~/.claude/projects/C--Users-aayus-Desktop-Start/memory/preferences.md
-~/.claude/projects/C--Users-aayus-Desktop-Start/memory/people.md
+memory/user.md        — Who Aayush is, background, communication style
+memory/decisions.md   — Architecture choices and what's connected vs not
+memory/preferences.md — Coding style, testing, how to run locally
+memory/people.md      — Collaborators and stakeholders
 ```
 
 At the end of every session (or when significant decisions are made), update the relevant memory files:
@@ -24,13 +24,13 @@ At the end of every session (or when significant decisions are made), update the
 
 ## Tech Stack
 
-- **Frontend**: Next.js 15 (App Router) + Tailwind CSS + shadcn/ui
+- **Frontend**: Next.js 16 (App Router) + Tailwind CSS v4 + shadcn/ui
 - **Backend**: Python FastAPI + Celery + Redis
 - **Agents**: Google ADK + A2A protocol
 - **Database**: Supabase PostgreSQL
 - **Auth**: Supabase Auth + GitHub OAuth
-- **PDF**: WeasyPrint (server-side)
-- **Scanning**: Semgrep, Bandit, TruffleHog, osv-scanner
+- **PDF**: ReportLab (server-side)
+- **Scanning**: Semgrep, TruffleHog, pip-audit, npm audit, custom regex
 - **AI**: Gemini 2.5 Flash/Pro via ADK
 - **Deploy**: Vercel (frontend) + Cloud Run (backend) + Vertex AI (agents)
 
@@ -38,12 +38,38 @@ At the end of every session (or when significant decisions are made), update the
 
 ```
 repolyze-ai/
-├── frontend/     # Next.js 15
-├── backend/      # Python FastAPI
-├── agents/       # ADK + A2A agents
-├── supabase/     # Database migrations
-└── docs/         # PRD, architecture docs
+├── frontend/        # Next.js 16 + shadcn/ui (3 pages: home, dashboard, scan detail)
+├── backend/         # Python FastAPI (demo.py for no-deps mode, app/main.py for production)
+│   ├── app/
+│   │   ├── api/     # Route handlers (scans, reports, health, a2a, demo_router)
+│   │   ├── services/# Scan engines (real_scan_service, secret_scanner, dependency_scanner, redteam_engine, pdf_generator)
+│   │   ├── db/      # Supabase repository layer (placeholder)
+│   │   └── models/  # Pydantic schemas
+│   └── tests/       # 31 tests (test_scan_service.py, test_demo_api.py)
+├── agents/          # ADK + A2A agents (7 sub-agents)
+├── autoresearch/    # Karpathy-style self-improving rules (scan_rules.py + evaluate.py)
+├── memory/          # Persistent memory for Claude (this system)
+├── supabase/        # Database migrations
+└── docs/            # PRD, architecture docs
 ```
+
+## Current State (Day 5 of 14-day MVP)
+
+### What Works
+- Full scan pipeline: clone -> detect -> 6 scanners -> aggregate -> PDF
+- Demo mode runs without external deps (no Supabase/Redis/API keys needed)
+- Frontend with 3 pages, polling, findings table, PDF download
+- 31 backend tests passing
+- Autoresearch at 570 score (100% detection, 0 false positives)
+
+### What's NOT Connected
+- Supabase (placeholder creds)
+- Redis / Celery workers
+- Gemini API (no key)
+- GitHub OAuth (no app)
+- Semgrep / TruffleHog (not installed locally, uses regex fallback)
+- Auth (returns fake user)
+- SSE streaming (sends once and closes)
 
 ## Coding Conventions
 
@@ -55,19 +81,9 @@ repolyze-ai/
 - **Commits**: Conventional commits (feat:, fix:, refactor:, etc.)
 - **Testing**: TDD approach — write tests first, 80%+ coverage target
 
-## Key Decisions (see decisions.md for full list)
-
-- Auto-detect AI agents in repos (LangChain, CrewAI, ADK, OpenAI Agents SDK)
-- Both static analysis AND live red-teaming from day 1
-- YAML-based red-team config (PromptFoo-style)
-- A2A protocol for independent agent communication
-- Freemium pricing (5-10 free scans/month)
-
 ## Before Starting Work
 
-1. Read memory files (above)
+1. Read memory files (memory/*.md)
 2. Check `docs/PRD.md` for requirements
-3. Review the plan at `~/.claude/plans/shimmering-wondering-marshmallow.md`
-4. Use planner agent for complex features
-5. Use tdd-guide agent for new features
-6. Use code-reviewer agent after writing code
+3. Run `cd backend && source .venv/bin/activate && python -m pytest tests/ -v` to verify nothing's broken
+4. Start servers: backend `python demo.py`, frontend `cd frontend && npx next dev`
