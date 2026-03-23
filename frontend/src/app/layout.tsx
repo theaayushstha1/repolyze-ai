@@ -15,6 +15,15 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "RepolyzeAI — AI-Powered Security Audit",
   description: "Paste your GitHub repo. Get a comprehensive security audit covering code vulnerabilities, AI agent safety, and MCP server security.",
+  icons: {
+    icon: "/favicon.png",
+    apple: "/favicon.png",
+  },
+  openGraph: {
+    title: "RepolyzeAI — AI-Powered Security Audit",
+    description: "Paste your repo. Know your risks. Ship with confidence.",
+    images: ["/logo.png"],
+  },
 };
 
 export default function RootLayout({
